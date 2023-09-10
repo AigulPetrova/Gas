@@ -1,0 +1,834 @@
+%скрипт для обучения нейросети для ГРС
+clear
+%%
+load data
+load temper
+%% Set up the Import Options and import the data
+opts = spreadsheetImportOptions("NumVariables", 1);
+
+% Specify sheet and range
+opts.Sheet = "Лист1";
+opts.DataRange = "A1:A8760";
+
+% Specify column names and types
+opts.VariableNames = "VarName1";
+opts.VariableTypes = "char";
+
+% Specify variable properties
+opts = setvaropts(opts, "VarName1", "WhitespaceRule", "preserve");
+opts = setvaropts(opts, "VarName1", "EmptyFieldRule", "auto");
+
+% Import the data
+Date1 = readtable("C:\Users\user\MATLAB Drive\1Exponenta\24.06 predictions\Date2.xlsx", opts, "UseExcel", false);
+
+% Convert to output type
+Date1 = table2cell(Date1);
+numIdx = cellfun(@(x) ~isnan(str2double(x)), Date1);
+Date1(numIdx) = cellfun(@(x) {str2double(x)}, Date1(numIdx));
+
+% Clear temporary variables
+clear numIdx opts
+%% нормируем данные, считаем матожидание и ско
+for i=1:numel(x)% число ячеек - грс в массиве х
+    for j = 1:3 % число строк-входных  переменных в каждой грс в массиве х
+    m(i,j) = mean(x{i, 1}(j,1:end-1));
+    s(i,j) = std(x{i, 1}(j,1:end-1));
+    end
+end
+%% нормируем данные
+for i=1:numel(x)
+    for j = 1:3 % число строк-входных  переменных в каждой грс в массиве х
+    x{i, 1}(j,:) = (x{i, 1}(j,1:end)- m(i,j))./s(i,j);
+    end
+end
+%% проверка нормирования, m1=0, s1=1
+for i=1:numel(x)% число ячеек - грс в массиве х
+    for j = 1:3 % число строк-входных  переменных в каждой грс в массиве х
+    m1(i,j) = mean(x{i, 1}(j,1:end-1));
+    s1(i,j) = std(x{i, 1}(j,1:end-1));
+    end
+end
+%% формируем строку ответов, это расход
+for i = 1:numel(x)
+     y{i} = x{i}(4,1:end);
+end
+%% подали выходную переменную саму на себя, сдвинув на 1 шаг
+for i = 1:numel(x)
+    x{i}(4,1:end-1) = [x{i}(4,2:end)];
+    %было x{i} = [x{i}(:,2:end)];
+end
+%% формируем обучающую и тестовую выборки, сначала берем первые 3 ячейки целиком,потому что в 4-й будем отделять часть данных для тестовой выборки
+% из 4-й ячейки часть оставляем на обучающую выборку
+x_train = x{(1:3)};% обучающая выборка для входного параметра, первые 3 ГРС
+y_train = y{(1:3)}; % обучающая выборка для выходного параметра, первые 3 ГРС
+%%
+n_x_train = 8000;
+x_train = [x_train'; x{4}(:,1:n_x_train)'];% обучающая выборка для входного параметра, часть из 4 ГРС
+y_train = [y_train'; y{4}(1:n_x_train)']; % обучающая выборка для выходного параметра, часть из 4 ГРС
+%%
+x_train = x_train';
+y_train = y_train';
+%%
+x_test = x{4}(:,n_x_train+1:end);% тестовая выборка, вторая часть из 4 ГРС
+y_test = y{4}(n_x_train+1:end);% тестовая выборка для выходного параметра, вторая часть из 4 ГРС
+%%
+% layer = [sequenceInputLayer(8), lstmLayer(128),fullyConnectedLayer(1), regressionLayer];
+%%
+% ops = trainingOptions("adam","Plots","training-progress",'MaxEpochs',100, "ValidationData", {x_test, y_test}, ...
+%     "InitialLearnRate", 0.01, "LearnRateSchedule", "piecewise", "LearnRateDropPeriod", 40, "LearnRateDropFactor", 0.3);
+%%
+% net = trainNetwork(x_train, y_train, layer, ops);
+%%
+% save net_grs net;
+%%
+% net = resetState(net);% Сброс состояния сети предотвращает влияние предыдущих прогнозов на прогнозы новых данных. 
+% net = predictAndUpdateState(net,x_train); % затем инициализируйте состояние сети, предсказав обучающие данные.
+%%
+%save net_grs net;
+load net_grs
+%% Predict on each time step. For each prediction, predict the next time step using the observed value of the previous time step. 
+y_pred = [];
+dur = 0;
+l = 1;
+m = 1;
+s = 1;
+% treshhold_jump = 0.5;
+tr_jump_1 = 0.3;
+tr_jump_2 = 0.5;
+tr_jump_3 = 0.7;
+% treshhold_SPEED = [0.25 0.5 0.75];
+tr_SPEED_1 = 0.3;
+tr_SPEED_2 = 0.5;
+tr_SPEED_3 = 0.75;
+tr_dur_1 = 12;
+tr_dur_2 = 18;
+tr_dur_3 = 24;
+temp = false;
+SPEED = [];
+n = 0;
+%% построение общего графика
+ii = 0;
+Y_pred = predict(net,x_test);
+anomaly = Y_pred(2:end) - y_test(1:end-1);
+f = figure;
+f.Position = [0,0,1000,1000];
+ax = axes;
+p = plot(ax,anomaly);
+title("Аномалии");
+hold on
+
+for k = 1:length(x_test)
+    [net,y_pred(:,k)] = predictAndUpdateState(net,x_test(:,k));
+    if k > 1 
+        y_temp = y_test(k-1);
+        a = abs(y_test(k-1) - y_pred(k)); % отклонение предксазания модели на к-том шаге от значения выборки на к-1 шаге
+        speed = y_pred(k) - y_test(k-1); % скорость на текущем шаге
+        % маленькое отклонение ============================================ 
+        if a > tr_jump_1 && a <= tr_jump_2 %&& ~isempty(SPEED) % отклонение больше первого и меньше второго порога- маленькое
+           temp = true;
+           y_temp = y_test(k-1);
+        end
+        if temp 
+             if abs(y_pred(k) - y_temp) > tr_jump_1 && abs(y_pred(k) - y_temp) <= tr_jump_2 % отклонение больше первого и меньше второго порга - маленькое
+                   disp("Отклонение маленькое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a)
+                   SPEED = [SPEED, speed];
+                   max_SPEED = max(abs(SPEED));
+                   mean_SPEED = mean(SPEED);
+                   dur = dur + 1;    
+                    if dur > tr_dur_3
+                        disp("Продолжительность большая, большой небаланс" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго порга - маленькая
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end  % цикл скорости
+                     elseif dur > tr_dur_1 && dur < tr_dur_2 % Продолжительность больше первого и меньше второго
+                         disp("Продолжительность маленькая" + " " + string(dur) + " " + "ч.")
+                         if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое," + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                         elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое," + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                         elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                         else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end    % цикл скорости
+                    elseif dur > tr_dur_2 && dur < tr_dur_3 % Продолжительность больше второго и меньше третьего порога
+                        disp("Продолжительность средняя" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое,"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое," + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение маленькое," + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "m", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end % цикл скорости
+                     end % цикл длительности
+                            temp = false;
+             else  % цикл отклонения                     
+                        SPEED = 0;
+                        dur = 0;
+             end % цикл отклонения      
+        end % цикл temp   
+% среднее отклонение ============================================ 
+        if a > tr_jump_2 && a <= tr_jump_3 
+            temp = true;
+            y_temp = y_test(k-1);
+        end
+        if temp 
+            if abs(y_pred(k) - y_temp) > tr_jump_2 && abs(y_pred(k) - y_temp) <= tr_jump_3 % отклонение больше второго и меньше третьего порога - среднее
+                    disp("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a)
+                    SPEED = [SPEED, speed];
+                    max_SPEED = max(abs(SPEED));
+                    mean_SPEED = mean(SPEED);
+                    dur = dur + 1;    
+                    if dur > tr_dur_3 % Продолжительность больше третьего порога 
+                        disp("Продолжительность большая, большой небаланс" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, " Скорость большая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго, маленькая
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, " Скорость маленькая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога, средняя
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, " Скорость средняя" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end    
+                    elseif dur > tr_dur_1 && dur < tr_dur_2 % Продолжительность больше первого и меньше второго,  маленькая
+                        disp("Продолжительность маленькая" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога, средняя
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end    
+                    elseif dur > tr_dur_2 && dur < tr_dur_3 % Продолжительность больше второго и меньше третьего порога, средняя
+                        disp("Продолжительность средняя" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur)+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго порога, маленькая
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога, средняя
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение среднее" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur));
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "y", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется")
+                            disp("___________________________________________")
+                        end    % цикл скорости
+                     end % цикл длительности
+%                             dur = dur + 1; 
+                            temp = false;
+            else   % цикл отклонения    
+%                         temp = false;
+                        SPEED = 0;
+                        dur = 0;
+           end % цикл отклонения   
+        end % цикл temp
+% большое отклонение ============================================ 
+        if a > tr_jump_3      
+           temp = true;
+           y_temp = y_test(k-1);
+        end
+        if temp 
+            if abs(y_pred(k) - y_temp) > tr_jump_3 % Отклонение больше третьего порога, большое
+               disp("Отклонение большое, большой небаланс" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a)
+                     SPEED = [SPEED, speed];
+                     max_SPEED = max(abs(SPEED));
+                     mean_SPEED = mean(SPEED);
+                     dur = dur + 1;    
+                     if dur > tr_dur_3 % Продолжительность больше третьего порога
+                        disp("Продолжительность большая, большой небаланс" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность большая" + " " + string(dur) + " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end    
+                     elseif dur > tr_dur_1 && dur < tr_dur_2 % Продолжительность больше первого и меньше второго порога, маленькая
+                        disp("Продолжительность маленькая" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго порога, маленькая
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur),+ " "+ "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога, средняя
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое"+ " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность маленькая" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end    
+                     elseif dur > tr_dur_2 && dur < tr_dur_3 % Продолжительность больше второго и меньше третьего порога, средняя
+                         disp("Продолжительность средняя" + " " + string(dur) + " " + "ч.")
+                        if max_SPEED > tr_SPEED_3
+                            disp("Скорость большая, большой небаланс")
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость большая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_1 && max_SPEED < tr_SPEED_2 % скорость больше первого и меньше второго, маленькая
+                            disp("Скорость маленькая")  
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость маленькая" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        elseif max_SPEED > tr_SPEED_2 && max_SPEED < tr_SPEED_3 % скорость больше второго и меньше третьего порога, средняя
+                            disp("Скорость средняя") 
+                            disp(SPEED)
+                            disp("___________________________________________")
+                            figure
+                            plot(SPEED);
+                            title("Отклонение большое" + " " + "номер" + " " + string(k) + " " + "значение" + " " + a, "Скорость средняя" + " " + SPEED + " " + "Продолжительность средняя" + " " + string(dur) + " " + "Большой небаланс");
+                            t = ax.YLim;
+                            plot(ax,[k,k], t, "k-.");
+                            T = text(ax, k, 0.5+ii/10, "Отклонение номер" + string(n));
+                            ii = ii + 1;
+                            date_1 = Date1{n_x_train + k};
+                            day_1 = date_1(1:2);
+                            month_1 = date_1(4:7);
+                            hour_1 = t1(n_x_train+k,1);
+                            T.String = "Отклонение номер" + " " + string(n) + " " + "длительность" + " " + string(dur) + newline + "Дата" + " " + day_1 + " " + month_1 + " " + "время" + " " + string(hour_1) + " " + "ч."; 
+                            T.FontSize = 8;
+                            plot(ax, [k-1,k],[y_pred(k-1) - y_test(k-2), y_pred(k) - y_test(k-1)], "r", "LineWidth", 3);
+                            pause(1) % секунда
+                            drawnow
+                        else      
+                            disp("Скорость почти не меняется") 
+                            disp("___________________________________________")
+                        end % цикл скорости
+                      end % цикл длительности 
+%                              dur = dur + 1; 
+                             temp = false;
+            else % цикл отклонения
+%                       temp = false; 
+                       dur = 0;
+                       SPEED = 0;
+            end % цикл отклонения
+        end % цикл temp 
+    end % цикл k
+end % цикл k
+%%
+anomaly = y_pred(2:end) - y_test(1:end-1);
+% plot(anomaly);
+% treshhold_jump = 0.5;
+% anomaly_jump = anomaly(abs(anomaly) > 0.5);
+% plot(anomaly_jump);
+% title("Отклонение");
+%%
+% idx = find(anomaly_jump); %индексы аномалий
+%%
+% y_pred = predict(net,x_test);
+% figure
+% plot(y_pred)
+% hold on
+% plot(y_test)
+%%
+% figure 
+% difference = y_pred - y_test;
+% plot(difference);
+% %%
+% y_pred_all = predict(net,x);
+% figure 
+% plot(y_pred_all{end});
+% hold on
+% plot(y{end});
+%% Визуал:
+% бегунки на пороги
+% как показать точки отклонений на графике измерений (аномалий)
+% как показать дату вместо индекса?
+% как замедлить показ скорости и что можно еще с ней сделать?
+% как показывать нарастающий итог длительности и скорости по каждому отклонению
+% как указать нарастающий итог количества отклонений?
+% как не печатать если скорость = 0 
+%% Данные
+% нарастает или нет скорость - как указать (ускорение)?
+% как убрать суточные пики (и надо ли)?
+% как обнаружить тренд?
+% как генерировать фальшивые отклонения
+% может быть надо убрать нормирование?
+% надо ли resetState 
+% как детектировать 3 уровня, большое, маленькое, среднее отклонение? 
+% как соединить 3 критерия - по трем уровням?
+%% Смыслы
+% как можно объяснить? как вывести в соответствие другие входные параметры?
+% imbalance levels - как просуммировать отклонения и вывести на экран?
+% как посчитать весь баланс в ГТС и сравнить с суммой выявленных отклонений?
+% можно ли сделать нейросеть для баланса сразу всей ГТС?
+% как соединить с anfis?
+% как соединить с формулой баланса?
+% как сделать регрессию запаса?
+% почему не надо делать validation?
+% как соединить с моделью управления? ПФ, матрица состояний и пр.?

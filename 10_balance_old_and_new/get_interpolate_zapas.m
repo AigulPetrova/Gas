@@ -1,0 +1,9 @@
+Z = readtable('Zapas_data_with_marth.xlsx');
+ind = 1:size(Z,1) * 2;
+ind_z = 2:2:size(Z,1) * 2;
+Z_1 = Z.Var2;
+Z_2 = Z.Var3;
+Z_3 = Z.Var4;
+z_interp_1 = interp1(ind_z,Z_1,ind,"spline");
+z_interp_2 = interp1(ind_z,Z_2,ind,"spline");
+z_interp_3 = interp1(ind_z,Z_3,ind,"spline");
