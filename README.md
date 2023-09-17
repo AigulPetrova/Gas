@@ -32,4 +32,4 @@
 2.	Перевести на С++, запрограммировать контроллер
 
 _____
-![Схема](Схема модели 1.jpg)
+![Схема](https://github.com/AigulPetrova/Gas/blob/86e5967bc2a582732c26ee1abcb0e2d5a213430d/%D0%A1%D1%85%D0%B5%D0%BC%D0%B0%20%D0%BC%D0%BE%D0%B4%D0%B5%D0%BB%D0%B8%201.jpg)
