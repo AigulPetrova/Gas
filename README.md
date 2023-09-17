@@ -33,3 +33,4 @@
 
 _____
 ![Схема](https://github.com/AigulPetrova/Gas/blob/86e5967bc2a582732c26ee1abcb0e2d5a213430d/%D0%A1%D1%85%D0%B5%D0%BC%D0%B0%20%D0%BC%D0%BE%D0%B4%D0%B5%D0%BB%D0%B8%201.jpg)
+![Схема](https://github.com/AigulPetrova/Gas/blob/5f4c6932e1c5b389cd034adcc56ad072cb6e3afd/%D0%A2%D0%B0%D0%B1%D0%BB%D0%B8%D1%86%D0%B0%201.jpg)
