@@ -5,4 +5,4 @@
  - Скрипт detection_3_param_3_levels_artem.m: идентификация по 3-м уровням аномалий
  - Работающий скрипт по одному уровню параметров: detection_3_param_1_level_vertical_lines_on_graf_anomaly_3.m
  - ВНИМАНИЕ: в этом скрипте применена старая нейросеть, обученная на 4 ГРС, соответственно, data и нейросеть другие чем в п.1.
- - ![График всех аномалий одной ГРС (тестовой выборки)](3_identification_gerg_nn/график аномалий.png)
+ - ![График всех аномалий одной ГРС (тестовой выборки)]([3_identification_gerg_nn/график аномалий.png](https://github.com/AigulPetrova/Gas/blob/main/3_identification_gerg_nn/%D0%B3%D1%80%D0%B0%D1%84%D0%B8%D0%BA%20%D0%B0%D0%BD%D0%BE%D0%BC%D0%B0%D0%BB%D0%B8%D0%B9.png)https://github.com/AigulPetrova/Gas/blob/main/3_identification_gerg_nn/%D0%B3%D1%80%D0%B0%D1%84%D0%B8%D0%BA%20%D0%B0%D0%BD%D0%BE%D0%BC%D0%B0%D0%BB%D0%B8%D0%B9.png)
