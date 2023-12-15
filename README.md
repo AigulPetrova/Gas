@@ -1,3 +1,31 @@
+# Methods and algorithms for neural network control of gas balance in the gas transportation network
+## Problems for Matlab
+1. Train a regression and classification neural network for all GDS (in progress).
+3. Identify and classify deviations. Assess the probability that the identified deviations belong to the original distribution law.
+4. Based on the anfis, determine the imbalance based on the deviations from clause 3.
+5. Determine the reserve, taking into account the real soil temperature and the unknown temperature T in the service station
+6. Create virtual sensors for expenses for own needs, reserves, imbalances, and elimination costs.
+7. Program an algorithm for deciding on corrective measures depending on the causes and optimization factor
+8. Determine the balance using the old and new methods
+9. Show the effectiveness of the method by comparing what the balance (imbalance) would be and what it would become
+10. Connect neural networks to gas and electric models
+11. Create transfer functions and state matrix
+12. Program the neural network controller
+    
+## For a model in Simulink
+1. Correctly, from the point of view of physical properties and statistical data, working model
+2. Generate new data
+3. Reading data from objects and additional training of the neural network (the neural network has already been trained)
+4. Identification of anomalies on objects by comparing real values and neural network predictions (the algorithm is being developed)
+5. Control based on the developed algorithm (the algorithm is being developed).
+6. Explore the possibility of using System Identification Toolbox
+7. Explore the possibility of using Neural Controller
+8. Obtain differential equations, transfer functions, state matrix
+9. Generate anomalies to check operation
+10. Connect UGS and reserves
+11. Include a regression neural network trained on all GRSs into a neural network with two outputs
+12. Translate into C++, program the controller
+
 # Методы и алгоритмы нейросетевого управления балансом газа в газотранспортной сети
 ## Задачи для Матлаб
 1.	Обучить регрессионную и классификационную нейросеть для всех ГРС (в процессе).
